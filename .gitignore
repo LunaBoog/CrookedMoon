@@ -1,0 +1,7 @@
+shots/
+src8/
+__pycache__/
+build/game.js
+build/_check.js
+*.pyc
+.DS_Store

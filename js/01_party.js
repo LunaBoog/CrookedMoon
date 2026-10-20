@@ -1,0 +1,140 @@
+/* ================================ party.js ============================= *
+ * The five PCs, straight from the table (seed-players.js, the character
+ * sheets, and the recaps). Stats are per level 1–5; the battle engine
+ * reads them through pcStat(). */
+const LEVEL_XP=[0,300,900,2000,4000,99999]; // xp needed for L1..L5
+const PARTY_DEF={
+  azareth:{name:"Azareth",cls:"Cleric",sub:"Cycles of the Harvest",species:"Harvestborn",bg:"Amnesiac",
+    thread:"Apocalypse",color:"#e0782a",hp:[10,17,24,31,38],ac:16,dex:3,init:3,slots:[2,3,4,4,5],
+    blurb:"A scarecrow with no memories and a jack-o'-lantern grin. Tactless, blunt, earnest. Heals the party, burns the dead.",
+    look:{kind:"scarecrow"},
+    abil:["sickle","crossbow","sacredFlame","healingWord","cureWounds","entangle","sowing","turnUndead","holdPerson","reaping"]},
+  lucky:{name:"Lucky McQuest",short:"Lucky",cls:"Rogue",sub:"Fate Gambler",species:"Relicborn",bg:"Crossroad Gambler",
+    thread:"The McQuest Debt",color:"#d9a441",hp:[9,15,21,27,33],ac:14,dex:3,init:3,ammo:10,
+    blurb:"A dapper skeleton with a pistol, a rapier, a lucky coin and absolutely no fear. Will bet on anything. Will pick any lock.",
+    look:{kind:"skeleton"},
+    abil:["rapier","pistol","feint","doubleOrNothing","hide","mockery"]},
+  poppi:{name:"Poppi",cls:"Sorcerer",sub:"Crimson Dynasty",species:"Threadborn",bg:"Scholar of the Forbidden",
+    thread:"Malediction",color:"#c8384a",hp:[8,13,20,26,32],ac:13,dex:3,init:3,slots:[2,3,4,5,6],
+    blurb:"A ball-jointed doll with a family curse and a hunger for forbidden books. Blood magic, bad omens, good intentions.",
+    look:{kind:"doll"},
+    abil:["bloodBolt","xbowP","inflictWounds","bane","bloodWell","twinned","eldritchWord","bloodSacrifice"]},
+  krodha:{name:"Krodha",cls:"Monk",sub:"Drunken Master",species:"Plagueborn",bg:"Reflected Wanderer",
+    thread:"The Divided Soul",color:"#6fbf73",hp:[9,15,21,27,33],ac:15,dex:3,init:3,
+    blurb:"Silas of Tsen. A wandering monk who sees evil as a plague. Easygoing, philosophical — then a throat punch. \"Let's just breathe, friend.\"",
+    look:{kind:"monk"},
+    abil:["martialArts","flurry","patientDefense","summonWeasel","sinEater","stunningStrike"]},
+  tessie:{name:"Tessie",cls:"Ranger",sub:"Grim Harbinger",species:"Deepborn",bg:"Beast Hunter",
+    thread:"The Soul-Eating Beast",color:"#4fb6c9",hp:[11,18,25,32,39],ac:14,dex:3,init:3,slots:[2,2,3,3,4],
+    blurb:"A shy Deepborn hunter tracking the beast that ate her clan's souls. Believes she's still alive. Her ghost greyhound Caster is wiser than all of you.",
+    look:{kind:"deepborn"},
+    abil:["longbow","shortsword","huntersMark","sicCaster","markOfDoom","volley"]},
+};
+const PARTY_ORDER=["azareth","lucky","poppi","krodha","tessie"];
+
+/* Abilities. cost: slot | ki | sp | ammo | rest (1/long rest) | battle (1/battle).
+   kind drives resolution in battle.js. lvl = level it unlocks. need = flag required. */
+const ABIL={
+  // Azareth
+  sickle:{name:"Sickle",kind:"weapon",bonus:5,dmg:"1d4+3",type:"slashing",desc:"Melee. The harvest blade. Culling: +1d12 necrotic vs foes at half HP or less.",cull:true},
+  crossbow:{name:"Light Crossbow",kind:"weapon",bonus:5,dmg:"1d8+3",type:"piercing",desc:"Ranged bolt.",cull:true},
+  sacredFlame:{name:"Sacred Flame",kind:"save",stat:"DEX",dc:13,dmg:"1d8",dmgL5:"2d8",type:"radiant",desc:"Cantrip. Radiant fire falls on a foe (DEX save, no cover). Undead hate it.",cull:true},
+  healingWord:{name:"Healing Word",kind:"heal",cost:{slot:1},heal:"1d4+3",target:"ally",revive:true,desc:"1 slot. Heal an ally from a distance — even if they're down."},
+  cureWounds:{name:"Cure Wounds",kind:"heal",cost:{slot:1},heal:"2d8+3",target:"ally",revive:true,desc:"1 slot. A big touch heal."},
+  entangle:{name:"Entangle",kind:"aoeStatus",cost:{slot:1},lvl:2,stat:"STR",dc:13,status:"restrained",turns:2,desc:"1 slot. Grasping weeds (STR save). Restrained foes are easier to hit and can't dodge."},
+  sowing:{name:"Channel: Sowing",kind:"partyTemp",cost:{rest:1},lvl:2,temp:5,desc:"1/rest. Holy symbol glows — every ally gains 5 temp HP and inspiration."},
+  turnUndead:{name:"Turn Undead",kind:"turn",cost:{rest:1,pool:"sowing"},lvl:2,stat:"WIS",dc:13,desc:"Shares Channel Divinity. Undead (WIS save) are turned and flee in terror for 2 turns."},
+  holdPerson:{name:"Hold Person",kind:"status",cost:{slot:1},lvl:3,stat:"WIS",dc:13,status:"paralyzed",turns:2,humanoid:true,desc:"1 slot. A humanoid foe is paralyzed (WIS save). Hits vs paralyzed are crits."},
+  reaping:{name:"Channel: Reaping",kind:"buffParty",cost:{rest:1,pool:"sowing"},lvl:4,buff:"reaping",desc:"Shares Channel Divinity. All allies deal +2 necrotic on their next hit."},
+  // Lucky
+  rapier:{name:"Rapier",kind:"weapon",bonus:5,dmg:"1d8+3",type:"piercing",sneak:true,desc:"Finesse melee. Sneak Attack when an ally already hit this foe this round, or you're hidden."},
+  pistol:{name:"Pistol",kind:"weapon",bonus:5,dmg:"1d6+3",type:"piercing",sneak:true,cost:{ammo:1},desc:"1 bullet. Ranged. Sneak Attack eligible. BANG."},
+  feint:{name:"Feint (Deception)",kind:"feint",desc:"Deception +7 vs the foe's wits. Success: the next ally attack vs it has advantage (and Lucky may Sneak Attack). Some foes have special weaknesses to trickery."},
+  doubleOrNothing:{name:"Double or Nothing",kind:"gamble",cost:{battle:1},desc:"1/battle. Flip the lucky coin. Heads: your next hit is a CRIT. Tails: take 1d4."},
+  hide:{name:"Cunning Action: Hide",kind:"hide",lvl:2,desc:"Stealth. Next attack has advantage and always Sneak Attacks."},
+  mockery:{name:"Vicious Mockery",kind:"save",stat:"WIS",dc:13,dmg:"1d6",type:"psychic",status:"disadv",turns:1,need:"luckyBard",desc:"Bard Lucky! (from the Crooked House library). A cutting insult: 1d6 psychic, foe has disadvantage on its next attack."},
+  // Poppi
+  bloodBolt:{name:"Blood Bolt",kind:"spell",bonus:4,dmg:"1d6",dmgL5:"2d6",type:"necrotic",desc:"Cantrip. A bolt of your own blood, spat into the dark."},
+  xbowP:{name:"Light Crossbow",kind:"weapon",bonus:5,dmg:"1d8+3",type:"piercing",desc:"Ranged bolt."},
+  inflictWounds:{name:"Inflict Wounds",kind:"spell",bonus:4,dmg:"3d10",type:"necrotic",cost:{slot:1},desc:"1 slot. Melee spell attack. Enormous necrotic damage."},
+  bane:{name:"Bane",kind:"aoeStatus",cost:{slot:1},stat:"CHA",dc:12,status:"bane",turns:3,max:3,desc:"1 slot. Up to 3 foes (CHA save) subtract 1d4 from their attack rolls."},
+  bloodWell:{name:"Blood Well",kind:"selfBuff",cost:{rest:1},buff:"bloodWell",desc:"1/rest. Your next damaging spell adds +1d8."},
+  twinned:{name:"Twinned Spell",kind:"selfBuff",cost:{sp:1},lvl:2,buff:"twinned",desc:"1 sorcery point. Your next Blood Bolt also strikes a second foe."},
+  eldritchWord:{name:"Dread Speech",kind:"status",cost:{rest:1},stat:"WIS",dc:12,status:"frightened",turns:2,desc:"1/rest. A word of forbidden truth. Foe is frightened (WIS save): disadvantage on attacks."},
+  bloodSacrifice:{name:"Blood Sacrifice",kind:"sacrifice",lvl:3,desc:"Spend 1d6 HP to regain a spell slot. The thread always wants more."},
+  // Krodha
+  martialArts:{name:"Martial Arts",kind:"multi",hits:2,bonus:5,dmg:"1d6+3",type:"bludgeoning",plague:true,desc:"Strike twice (fist + bonus strike). Plague Bearer: foes may be poisoned (CON DC 11)."},
+  flurry:{name:"Flurry of Blows",kind:"multi",hits:3,bonus:5,dmg:"1d6+3",type:"bludgeoning",plague:true,cost:{ki:1},desc:"1 ki. Three strikes in a drunken blur."},
+  patientDefense:{name:"Drunken Sway",kind:"selfBuff",cost:{ki:1},buff:"dodge",desc:"1 ki. Patient Defense — attacks against Krodha have disadvantage until his next turn."},
+  summonWeasel:{name:"Summon Giant Weasel",kind:"summon",cost:{battle:1},desc:"1/battle. Krodha's companion joins the fight for 3 rounds. (The weasels of Wickermoor do NOT consider him one of them.)"},
+  sinEater:{name:"Sin Eater",kind:"sinEater",cost:{rest:1},need:"krodhaMirror",desc:"1/rest. \"You are born to sin and must consume sin.\" Drain a foe: 2d8 necrotic, heal that much."},
+  stunningStrike:{name:"Stunning Strike",kind:"stun",cost:{ki:1},lvl:5,bonus:5,dmg:"1d6+3",type:"bludgeoning",stat:"CON",dc:13,desc:"1 ki. A strike to the nerve. Stunned foes lose their turn."},
+  // Tessie
+  longbow:{name:"Longbow",kind:"weapon",bonus:5,dmg:"1d8+3",type:"piercing",mark:true,desc:"Ranged. +1d6 vs your Hunter's Mark."},
+  shortsword:{name:"Shortsword",kind:"weapon",bonus:5,dmg:"1d6+3",type:"piercing",mark:true,desc:"Melee."},
+  huntersMark:{name:"Hunter's Mark",kind:"mark",cost:{slot:1},desc:"1 slot. Mark your quarry: your hits deal +1d6."},
+  sicCaster:{name:"Sic 'em, Caster!",kind:"caster",need:"caster",desc:"Your ghostly greyhound bites (1d6+2) and frightens vermin and weasels — canines terrify them."},
+  markOfDoom:{name:"Harbinger's Omen",kind:"status",cost:{rest:1},lvl:2,status:"doomed",turns:3,auto:true,desc:"1/rest. Grim Harbinger. The foe's AC drops by 2 and every hit on it crits on 19–20."},
+  volley:{name:"Volley",kind:"aoe",cost:{slot:1},lvl:5,bonus:5,dmg:"1d8+3",type:"piercing",desc:"1 slot. Arrows rain on every foe."},
+};
+
+/* Items. use: where usable. */
+const ITEMS={
+  potion:{name:"Healing Potion",icon:"🧪",price:50,use:"both",heal:"2d4+2",target:"ally",desc:"Heals 2d4+2. Morgan's brew."},
+  goodberry:{name:"Goodberry",icon:"🫐",use:"both",heal:"1",target:"ally",desc:"Azareth's berries. Heals 1 HP each — but they add up."},
+  honeycake:{name:"Honey Cake",icon:"🍯",price:6,use:"both",heal:"5",target:"ally",desc:"From Bread by Holly. Heals 5. Sugary things drive some fey wild…"},
+  salts:{name:"Smelling Salts",icon:"🧂",price:30,use:"battle",revive:true,target:"downed",desc:"Revive a downed ally at 1/4 HP."},
+  holywater:{name:"Holy Water",icon:"💧",price:25,use:"battle",dmg:"2d6",type:"radiant",target:"enemy",undeadOnly:true,desc:"2d6 radiant to undead or fiends."},
+  antitoxin:{name:"Antitoxin",icon:"💊",price:20,use:"both",cure:true,target:"ally",desc:"Cures poison and bad feelings."},
+  bottle:{name:"Empty Bottle",icon:"🍾",price:2,use:"battle",secret:"bottleTrap",target:"enemy",desc:"Upright and empty. Wayward haints can be drawn into bottles…"},
+  iron:{name:"Iron Filings",icon:"⛓",price:8,use:"battle",secret:"ironLine",target:"enemy",desc:"A line of iron. The Shrouded cannot cross iron."},
+  tooth:{name:"A Tooth",icon:"🦷",use:"battle",secret:"toothGift",target:"enemy",desc:"Freely given. (Azareth has… a lot of these.)"},
+  toyrabbit:{name:"Stuffed Rabbit",icon:"🐰",use:"battle",secret:"wardInnocence",target:"enemy",desc:"A child's beloved toy from the Lockwood toy box."},
+  wine:{name:"Fine Wine",icon:"🍷",use:"key",desc:"A dusty bottle from the Crooked House kitchen."},
+};
+const KEYITEMS={
+  ticket:{name:"Ghostlight Ticket",icon:"🎫",desc:"ADMIT ONE · DESTINATION: DRUSKENVALD. None of you remember buying it."},
+  vinyl:{name:"Vinyl Record",icon:"💿",desc:"Found in the mail car. The label reads 'Aria for a Second Voice'."},
+  painting:{name:"Seascape Painting",icon:"🖼",desc:"A stormy sea in a gilt frame, from the lounge car."},
+  loveletter:{name:"Love Letter",icon:"💌",desc:"'My dearest — I will come back for you.' Unsigned. Krodha read it anyway."},
+  sausage:{name:"Ghostly Sausages",icon:"🌭",desc:"Leftovers from the Daydreamer's plate. Lucky took them. Of course he did."},
+  steak:{name:"Steak & Eggs",icon:"🍳",desc:"Two plates from the dining car kitchen. Still steaming, somehow."},
+  keyring:{name:"Ring of Keys",icon:"🗝",desc:"The circus car's cage keys."},
+  ironring:{name:"Iron Ring",icon:"💍",desc:"Taken from the ghost tiger's paw. Cold as the Shroud."},
+  mcquestcase:{name:"McQuest Case",icon:"🧳",desc:"Gambling kit + a letter from a famous gambler to a McQuest: 'Your father doesn't own your soul.' Classic McQuest."},
+  rubyring:{name:"Ruby Ring",icon:"💎",desc:"Silver set with rubies. Krodha found it. Worth a lot."},
+  soulJar:{name:"Soul-Flame Jar",icon:"🏮",desc:"A jar of ghostly green soul-flame, plucked from the wreck-trees."},
+  pelt:{name:"Wolf Pelt",icon:"🐺",desc:"From the ritual wolves. Thomasin could make a cloak of it."},
+  finger:{name:"Marble Finger",icon:"☝",desc:"Local stone. Missing for centuries from the knight statue in the Brightsinger church."},
+  hexbag:{name:"Hex Bag",icon:"👝",desc:"Dried herbs, bones, powders — and very old, very cursed land-magic. A ticking bomb."},
+  handeffigy:{name:"Hand Effigy (sticks)",icon:"✋",desc:"Bundled sticks shaped like a hand. From the crude Wytchwood campsite. Not cursed. Probably."},
+  knife:{name:"Dull Bloody Knife",icon:"🔪",desc:"Rusty scrap with a cloth grip. The blade that took Ed Hardy's fingers."},
+  map:{name:"Finneas's Map",icon:"🗺",desc:"A map of Wickermoor Hollow, annotated by a schoolteacher."},
+  candle:{name:"Candles",icon:"🕯",desc:"Lucky's burglar-pack candles."},
+  fingerEffigy:{name:"Finger Effigy",icon:"🖐",desc:"An idol of mangled fingers from the Chapel of the Hands. Poppi grew an extra finger touching it."},
+  gem:{name:"Heirloom: Gem",icon:"🔴",desc:"The peacock's bloodstone eye."},
+  cup:{name:"Heirloom: Cup",icon:"🍵",desc:"Petunia's teacup, traded for wine."},
+  key:{name:"Heirloom: Key",icon:"🎹",desc:"A black key that popped out of the harpsichord."},
+  doll:{name:"Heirloom: Doll",icon:"🪆",desc:"Sally Lockwood's wooden doll."},
+  bear:{name:"Heirloom: Bear",icon:"🧸",desc:"The blue bear from the nursery."},
+  pin:{name:"Heirloom: Pin",icon:"📌",desc:"A bobby pin from the stuffed bear's nose."},
+  journal:{name:"Phillip's Journal",icon:"📓",desc:"'Upon entering Wickermoor Hollow I lost my powers as the Lord of Death…'"},
+  pocketwatch:{name:"Golden Pocketwatch",icon:"⌚",desc:"Inscribed: 'Remember the 3rd.'"},
+  duck:{name:"Silver 'Raven' Duck",icon:"🦆",desc:"Figurine of Wondrous Power. Throw it and it becomes… a messenger duck."},
+  satchel:{name:"Weathered Satchel",icon:"👁",desc:"A bag of holding with an eye on it. Contains a Lurker-in-the-Dark."},
+  greenscarf:{name:"Faded Green Scarf",icon:"🧣",desc:"Petunia's. Powerful. Cursed. Tessie wears it."},
+  pearl:{name:"Pearl of Power",icon:"⚪",desc:"Azareth: +1 spell slot."},
+};
+/* Equipment that modifies stats (flags) */
+const GEAR={
+  luckyJacket:{who:"lucky",ac:1,name:"Studded Puffer Jacket",desc:"Lucky's hype-beast armor from A Stitch in Time."},
+  wolfCloak:{who:"azareth",ac:1,name:"Wolf-Pelt Cloak",desc:"Advantage on stealth. +1 AC."},
+  woolCloak:{who:"poppi",ac:1,name:"Patchwork Wool Cloak",desc:"From the ancient graves. +1 AC."},
+  greenScarf:{who:"tessie",atk:1,dmg:1,name:"Faded Green Scarf",desc:"Cursed but mighty: +1 to hit and damage."},
+  pearl:{who:"azareth",slots:1,name:"Pearl of Power",desc:"+1 spell slot."},
+  smithAz:{who:"azareth",atk:1,name:"Honed Sickle",desc:"Jean Myriel's work. +1 to hit."},
+  smithLu:{who:"lucky",atk:1,name:"Balanced Rapier",desc:"Jean Myriel's work. +1 to hit."},
+  smithKr:{who:"krodha",atk:1,name:"Iron Knuckle Wraps",desc:"Jean Myriel's work. +1 to hit."},
+  smithTe:{who:"tessie",atk:1,name:"Smith-Tuned Longbow",desc:"Jean Myriel's work. +1 to hit."},
+  smithPo:{who:"poppi",atk:1,name:"Silvered Crossbow",desc:"Jean Myriel's work. +1 to hit."},
+};
