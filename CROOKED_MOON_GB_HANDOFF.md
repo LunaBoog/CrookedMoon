@@ -210,6 +210,12 @@ Layered the usual way (re-assigned function declarations, five new files). Nothi
 - `tryMove` is re-assigned without the old exit branch. `facedEntity` falls back to `{type:"exit"}`, and `interact` routes that to `useExit8`.
 - The bot uses `warp()`, so it is unaffected.
 
+**v8.1 · DM Screen ▸ ⚔ END BATTLE** (`js/32_v8_dm.js`, Moon's request). These are at the top of the DM Screen, and work during any fight, including mid-menu or mid-target-pick.
+- **Retreat** ends the battle as a flee: no XP, no game over, and downed PCs get 1 HP. A roaming monster resets.
+- **Call it a win** drops every foe and shows the normal victory screen with XP and gold. Story fights continue as if won.
+- How it works: `pcTurn` is raced against an abort promise, and input handlers left on the stack are trimmed back to their pre-battle depth.
+- The `` ` `` key now opens the DM Screen even while the battle menu has focus.
+
 **State:** `STATE.v8 = {acts, perfect, braces, stamps, cards}` (display only, not scored). Options live with the v7 ones as `v8_*` keys in `cmgb1:v7opts`.
 
 **Decisions**
