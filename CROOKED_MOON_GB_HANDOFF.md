@@ -198,6 +198,18 @@ Layered the usual way (re-assigned function declarations, five new files). Nothi
   - Credits get a **YOUR RUN** block.
 - `css/v8.css` is injected at `/*__V8CSS__*/`, and `assets_v8.js` at `/*__ASSETS8__*/`.
 
+
+**v8.1 · Oct 20 (Moon's request): free walking + doors on A** (`js/31_v8_explore.js`)
+- In **Wickermoor Village**, buildings and tree lines no longer block. `MAPS.village.grid` has every `#` cleared at load, so only the map edge, people and solid props stop you.
+- **Every exit is now entered with A, Space or Z**, never by walking into it. This covers doors, train couplings and paths off a map.
+  - Stepping onto an exit just puts you on the doorstep.
+  - A works while you're standing on the exit or facing it.
+  - The prompt chip reads `A ▸ ENTER / GO / LOOK <place>`.
+  - Locked ways still give their reason, and a ★ event on an exit still fires first.
+  - Hidden, still-locked secret ways stay solid.
+- `tryMove` is re-assigned without the old exit branch. `facedEntity` falls back to `{type:"exit"}`, and `interact` routes that to `useExit8`.
+- The bot uses `warp()`, so it is unaffected.
+
 **State:** `STATE.v8 = {acts, perfect, braces, stamps, cards}` (display only, not scored). Options live with the v7 ones as `v8_*` keys in `cmgb1:v7opts`.
 
 **Decisions**
